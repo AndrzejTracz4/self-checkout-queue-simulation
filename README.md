@@ -21,7 +21,7 @@ During peak hours, a store manager usually has one extra employee. Should that p
 Work in progress. The model is being built step by step:
 
 - [x] 1. Load and clean POS data, basket size distribution
-- [ ] 2. Checkout choice model (logit) calibrated on the data
+- [x] 2. Checkout choice model (logit) calibrated on the data
 - [ ] 3. Service time regressions, breaks between customers, exceptions
 - [ ] 4. Basic SimPy model with queue verification (Erlang C)
 - [ ] 5. Full customer flow: shopping time, queue choice and switching, SCO assistant interventions
@@ -35,6 +35,7 @@ retail-pos-queue-simulation/
 ├── data/pos/          POS transaction files (not tracked, see below)
 ├── results/           generated output (not tracked)
 ├── pos_data.py        loading, cleaning, basket size distribution
+├── calibration.py     model parameters estimated from the data (logit)
 ├── main.py            entry point
 └── requirements.txt
 ```
@@ -58,9 +59,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python pos_data.py
+python calibration.py
 ```
 
-Expected output: 162,930 valid transactions, 24.6% of them at self-checkouts, mean basket size of 15.5 items.
+Expected output:
+
+- `pos_data.py`: 162,930 valid transactions, 24.6% of them at self-checkouts, mean basket size of 15.5 items.
+- `calibration.py`: logit parameters a = 0.2624 and b = -0.6597 estimated with maximum likelihood. Brent's method then shifts a to 1.6782 so that 54% of customers prefer self-checkouts, the share reported by ECR Retail Loss (2026).
 
 ## Author
 
