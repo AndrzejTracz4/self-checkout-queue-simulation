@@ -22,8 +22,8 @@ Work in progress. The model is being built step by step:
 
 - [x] 1. Load and clean POS data, basket size distribution
 - [x] 2. Checkout choice model (logit) calibrated on the data
-- [ ] 3. Service time regressions, breaks between customers, exceptions
-- [ ] 4. Basic SimPy model with queue verification (Erlang C)
+- [x] 3. Service time regressions, breaks between customers, exceptions
+- [x] 4. Basic SimPy model with queue verification (Erlang C)
 - [ ] 5. Full customer flow: shopping time, queue choice and switching, SCO assistant interventions
 - [ ] 6. Experiments: variants W0 to W4, replications, common random numbers
 - [ ] 7. Statistics, sensitivity analysis and charts
@@ -35,7 +35,9 @@ retail-pos-queue-simulation/
 ├── data/pos/          POS transaction files (not tracked, see below)
 ├── results/           generated output (not tracked)
 ├── pos_data.py        loading, cleaning, basket size distribution
-├── calibration.py     model parameters estimated from the data (logit)
+├── calibration.py     model parameters estimated from the data (logit, service times)
+├── model.py           SimPy simulation model
+├── validation.py      model checks against queueing theory (Erlang C, Little's law)
 ├── main.py            entry point
 └── requirements.txt
 ```
@@ -60,12 +62,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python pos_data.py
 python calibration.py
+python validation.py
 ```
 
 Expected output:
 
 - `pos_data.py`: 162,930 valid transactions, 24.6% of them at self-checkouts, mean basket size of 15.5 items.
-- `calibration.py`: logit parameters a = 0.2624 and b = -0.6597 estimated with maximum likelihood. Brent's method then shifts a to 1.6782 so that 54% of customers prefer self-checkouts, the share reported by ECR Retail Loss (2026).
+- `calibration.py`: logit parameters a = 0.2624 and b = -0.6597 estimated with maximum likelihood. Brent's method then shifts a to 1.6782 so that 54% of customers prefer self-checkouts, the share reported by ECR Retail Loss (2026). It also fits service time regressions (ln T = b + a ln n) for staffed and self-checkouts, flags unusually long transactions with Tukey's rule (1.80% and 1.33%), fits a gamma distribution to breaks between customers at staffed checkouts (mean 17.1 s) and a regression for packing time at self-checkouts (mean 56.6 s).
+- `validation.py`: runs a simplified M/M/4 version of the model (80 customers per hour, mean service 150 s) in 30 replications. The simulated mean wait (150.4 ± 28.2 s) matches the Erlang C formula (148.0 s), and Little's law holds (L = 6.72, λW = 6.70).
 
 ## Author
 
