@@ -14,6 +14,7 @@ def load_transactions():
     df["checkout"] = "TRAD"
     df.loc[df["WorkstationGroupID"] == SCO_GROUP_ID, "checkout"] = "SCO"
     df["start"] = pd.to_datetime(df["BeginDateTime"])
+    df["hour"] = df["start"].dt.floor("h")
     return df
 
 def clean(df):
