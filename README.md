@@ -31,12 +31,14 @@ Work in progress. The model is being built step by step:
 ## Project structure
 
 ```
-retail-pos-queue-simulation/
+self-checkout-queue-simulation/
 ├── data/pos/          POS transaction files (not tracked, see below)
 ├── results/           generated output (not tracked)
 ├── pos_data.py        loading, cleaning, basket size distribution
 ├── calibration.py     model parameters estimated from the data (logit, service times)
-├── model.py           SimPy simulation model
+├── params.py          model parameters and store layout (variant W0)
+├── simulation.py      full checkout zone model (staffed checkouts + SCO)
+├── model.py           simplified M/M/c model used for verification
 ├── validation.py      model checks against queueing theory (Erlang C, Little's law)
 ├── main.py            entry point
 └── requirements.txt
@@ -63,6 +65,7 @@ pip install -r requirements.txt
 python pos_data.py
 python calibration.py
 python validation.py
+python simulation.py
 ```
 
 Expected output:
@@ -70,6 +73,7 @@ Expected output:
 - `pos_data.py`: 162,930 valid transactions, 24.6% of them at self-checkouts, mean basket size of 15.5 items.
 - `calibration.py`: logit parameters a = 0.2624 and b = -0.6597 estimated with maximum likelihood. Brent's method then shifts a to 1.6782 so that 54% of customers prefer self-checkouts, the share reported by ECR Retail Loss (2026). It also fits service time regressions (ln T = b + a ln n) for staffed and self-checkouts, flags unusually long transactions with Tukey's rule (1.80% and 1.33%), fits a gamma distribution to breaks between customers at staffed checkouts (mean 17.1 s) and a regression for packing time at self-checkouts (mean 56.6 s).
 - `validation.py`: runs a simplified M/M/4 version of the model (80 customers per hour, mean service 150 s) in 30 replications. The simulated mean wait (150.4 ± 28.2 s) matches the Erlang C formula (148.0 s), and Little's law holds (L = 6.72, λW = 6.70).
+- `simulation.py`: runs variant W0 for 10 hours with 90 customers per hour. Each customer gets a basket size, shopping time, preferred checkout type and service time drawn from the calibrated distributions. Queue choice and SCO assistant interventions come in the next step.
 
 ## Author
 
