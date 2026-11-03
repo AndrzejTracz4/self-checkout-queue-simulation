@@ -21,10 +21,13 @@ def load_basket_cdf():
 
 class Store:
 
-    def __init__(self, env, p, rng):
+    def __init__(self, env, p, seed):
         self.env = env
         self.p = p
-        self.rng = rng
+        self.seed = seed
+        # wspólne liczby losowe: osobny strumień na przyjścia i osobny na każdego klienta
+        self.arrival_rng = np.random.default_rng([seed, 0])
+        self.customers_created = 0
 
         # każda kasa tradycyjna ma swoją kolejkę, SCO mają jedną wspólną
         self.trad = [simpy.Resource(env, capacity=1) for _ in range(p.trad_checkouts)]
@@ -40,42 +43,42 @@ class Store:
 
     # --- losowanie cech klienta ---
 
-    def draw_basket(self):
-        u = self.rng.random()
-        i = np.searchsorted(self.basket_cdf, u)   # pierwsze n, dla którego F(n) >= u
+    def draw_basket(self, rng):
+        u = rng.random()
+        i = np.searchsorted(self.basket_cdf, u)  # pierwsze n, dla którego F(n) >= u
         return int(self.basket_n[min(i, len(self.basket_n) - 1)])
 
-    def draw_shopping_time(self):
-        return math.exp(self.shop_mu + self.shop_s * self.rng.normal())
+    def draw_shopping_time(self, rng):
+        return math.exp(self.shop_mu + self.shop_s * rng.normal())
 
-    def prefers_sco(self, n):
+    def prefers_sco(self, rng, n):
         z = self.p.logit_a + self.p.logit_b * math.log(n)
         p_sco = 1 / (1 + math.exp(-z))
-        return self.rng.random() < p_sco
+        return rng.random() < p_sco
 
-    def draw_interventions(self):
+    def draw_interventions(self, rng):
         # liczba wezwań asystenta (Poisson) i czas każdego z nich (lognormalny)
-        k = self.rng.poisson(self.p.intervention_rate)
-        return [math.exp(self.int_mu + self.int_s * self.rng.normal()) for _ in range(k)]
+        k = rng.poisson(self.p.intervention_rate)
+        return [math.exp(self.int_mu + self.int_s * rng.normal()) for _ in range(k)]
 
-    def draw_card_retry(self):
-        return self.p.card_retry_s if self.rng.random() < self.p.card_retry_p else 0.0
+    def draw_card_retry(self, rng):
+        return self.p.card_retry_s if rng.random() < self.p.card_retry_p else 0.0
 
     # --- czasy obsługi ---
 
-    def trad_service_time(self, n):
+    def trad_service_time(self, rng, n):
         p = self.p
-        t = math.exp(p.trad_b + p.trad_a * math.log(n) + p.trad_sigma * self.rng.normal())
-        t += self.rng.gamma(p.trad_break_k, p.trad_break_theta)
-        if self.rng.random() < p.trad_exception_p:
-            t += math.exp(self.exc_mu + self.exc_s * self.rng.normal())
+        t = math.exp(p.trad_b + p.trad_a * math.log(n) + p.trad_sigma * rng.normal())
+        t += rng.gamma(p.trad_break_k, p.trad_break_theta)
+        if rng.random() < p.trad_exception_p:
+            t += math.exp(self.exc_mu + self.exc_s * rng.normal())
         return t
 
-    def sco_service_time(self, n):
+    def sco_service_time(self, rng, n):
         # zwraca osobno skanowanie i pakowanie, bo interwencja jest między nimi
         p = self.p
-        scan = math.exp(p.sco_b + p.sco_a * math.log(n) + p.sco_sigma * self.rng.normal())
-        pack = math.exp(p.pack_b + p.pack_a * math.log(n) + p.pack_sigma * self.rng.normal())
+        scan = math.exp(p.sco_b + p.sco_a * math.log(n) + p.sco_sigma * rng.normal())
+        pack = math.exp(p.pack_b + p.pack_a * math.log(n) + p.pack_sigma * rng.normal())
         return scan, pack
 
     # --- szacowanie czekania (to, co klient widzi przy kasach) ---
@@ -115,8 +118,9 @@ class Store:
     def arrivals(self):
         mean_gap = 3600 / self.p.arrivals_per_hour
         while True:
-            yield self.env.timeout(self.rng.exponential(mean_gap))
-            self.env.process(self.customer())
+            yield self.env.timeout(self.arrival_rng.exponential(mean_gap))
+            self.customers_created += 1
+            self.env.process(self.customer(self.customers_created))
 
     def sco_session(self, scan, pack, interventions):
         # klient zajmuje terminal przez cały czas, także gdy czeka na asystenta
@@ -131,22 +135,29 @@ class Store:
         yield self.env.timeout(pack)
         return assistant_wait
 
-    def customer(self):
+    def customer(self, number):
         entered = self.env.now
 
-        # wszystko losujemy od razu, żeby klient miał te same cechy w każdym wariancie
-        n = self.draw_basket()
-        shopping = self.draw_shopping_time()
-        preferred_sco = self.prefers_sco(n)
-        trad_time = self.trad_service_time(n)
-        scan, pack = self.sco_service_time(n)
-        interventions = self.draw_interventions()
-        card_retry = self.draw_card_retry()
+        # klient nr i ma własny generator, więc ma te same cechy w każdym wariancie
+        rng = np.random.default_rng([self.seed, 1, number])
+        n = self.draw_basket(rng)
+        shopping = self.draw_shopping_time(rng)
+        preferred_sco = self.prefers_sco(rng, n)
+        trad_time = self.trad_service_time(rng, n)
+        scan, pack = self.sco_service_time(rng, n)
+        interventions = self.draw_interventions(rng)
+        card_retry = self.draw_card_retry(rng)
 
         yield self.env.timeout(shopping)
         at_checkouts = self.env.now
 
         queue = self.choose_queue(preferred_sco)
+
+        # rezygnacja: przy zbyt długiej kolejce klient odkłada koszyk i wychodzi
+        if self.wait_estimate(queue, len(queue.queue)) > self.p.balk_wait_s:
+            self.records.append({"entered": entered, "at_checkouts": at_checkouts,
+                                 "left": at_checkouts, "items": n, "balked": True})
+            return
         request = queue.request()
         switches = 0
 
@@ -162,39 +173,46 @@ class Store:
                 request = queue.request()
                 switches += 1
 
-        wait = self.env.now - at_checkouts
+        # zapis w chwili rozpoczęcia obsługi: czekanie jest już znane, nawet jeśli
+        # symulacja skończy się w trakcie obsługi (inaczej gubilibyśmy najdłużej czekających)
         started = self.env.now
+        record = {
+            "entered": entered,
+            "at_checkouts": at_checkouts,
+            "left": np.nan,
+            "items": n,
+            "balked": False,
+            "preferred": "SCO" if preferred_sco else "TRAD",
+            "checkout": "SCO" if queue is self.sco else "TRAD",
+            "switches": switches,
+            "wait_s": started - at_checkouts,
+            "service_s": np.nan,
+            "interventions": 0,
+            "intervention_s": 0.0,
+            "assistant_wait_s": 0.0,
+        }
+        self.records.append(record)
         assistant_wait = 0.0
 
         if queue is self.sco:
             assistant_wait = yield from self.sco_session(scan, pack, interventions)
             yield self.env.timeout(card_retry)
         else:
-            interventions = []   # u kasjera nie ma wezwań asystenta
+            interventions = []  # u kasjera nie ma wezwań asystenta
             yield self.env.timeout(trad_time + card_retry)
         queue.release(request)
 
-        self.records.append({
-            "entered": entered,
-            "at_checkouts": at_checkouts,
-            "left": self.env.now,
-            "items": n,
-            "preferred": "SCO" if preferred_sco else "TRAD",
-            "checkout": "SCO" if queue is self.sco else "TRAD",
-            "switches": switches,
-            "wait_s": wait,
-            "service_s": self.env.now - started,
-            "interventions": len(interventions),
-            "intervention_s": sum(interventions),
-            "assistant_wait_s": assistant_wait,
-        })
+        record["left"] = self.env.now
+        record["service_s"] = self.env.now - started
+        record["interventions"] = len(interventions)
+        record["intervention_s"] = sum(interventions)
+        record["assistant_wait_s"] = assistant_wait
 
 
 def run(p=None, seed=0):
     p = p or Params()
-    rng = np.random.default_rng(seed)
     env = simpy.Environment()
-    store = Store(env, p, rng)
+    store = Store(env, p, seed)
     env.process(store.arrivals())
     env.run(until=p.hours * 3600)
     return pd.DataFrame(store.records)
@@ -203,6 +221,7 @@ def run(p=None, seed=0):
 if __name__ == "__main__":
     p = Params()
     df = run(p, seed=1)
+    df = df[~df["balked"] & df["left"].notna()]   # tylko klienci, którzy skończyli zakupy
 
     print(f"W0: {p.trad_checkouts} kasa tradycyjna, {p.sco_checkouts} SCO, "
           f"{p.assistants} asystent, {p.arrivals_per_hour:.0f} klientów/h, {p.hours:.0f} h")

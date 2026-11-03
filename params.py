@@ -53,4 +53,10 @@ class Params:
     card_retry_p: float = 0.01
     card_retry_s: float = 48.0
 
+    # rezygnacja z zakupów, gdy szacowane czekanie przekracza 30 min (założenie)
+    balk_wait_s: float = 1800.0
+
+    # eksperyment: rozgrzewka odrzucana z wyników, potem pomiar
+    warmup_h: float = 2.0
+
     hours: float = 10.0
