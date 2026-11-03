@@ -38,4 +38,19 @@ class Params:
     pack_a: float = 0.2612
     pack_sigma: float = 0.4912
 
+    # wybór kolejki: klient szacuje czekanie ze średnich czasów obsługi
+    est_trad_s: float = 86.7           # średnia obsługa u kasjera
+    est_sco_s: float = 178.0           # średnia obsługa na SCO
+    switch_threshold_s: float = 173.0  # zmiana kolejki, gdy zysk > 2 obsługi u kasjera
+    jockey_check_s: float = 10.0       # co ile sekund klient rozgląda się w kolejce
+
+    # interwencje asystenta na SCO (ECR 2026): Poisson na transakcję
+    intervention_rate: float = 0.1
+    intervention_mean_s: float = 30.0
+    intervention_cv: float = 0.5
+
+    # Ponowna płatność kartą (Polasik i in. 2012)
+    card_retry_p: float = 0.01
+    card_retry_s: float = 48.0
+
     hours: float = 10.0
